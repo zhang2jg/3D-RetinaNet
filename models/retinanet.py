@@ -64,7 +64,8 @@ class RetinaNet(nn.Module):
         self.SEQ_LEN = args.SEQ_LEN
         self.HEAD_LAYERS = args.HEAD_LAYERS
         self.NUM_FEATURE_MAPS = args.NUM_FEATURE_MAPS
-        
+        self.cls_num_list = args.cls_num_list # by jing
+
         self.reg_heads = []
         self.cls_heads = []
         self.prior_prob = 0.01
@@ -83,6 +84,7 @@ class RetinaNet(nn.Module):
         self.ego_head = nn.Conv3d(self.head_size, args.num_ego_classes, kernel_size=(
             3, 1, 1), stride=1, padding=(1, 0, 0))
         nn.init.constant_(self.ego_head.bias, bias_value)
+
 
 
     def forward(self, images, gt_boxes=None, gt_labels=None, ego_labels=None, counts=None, img_indexs=None, get_features=False):

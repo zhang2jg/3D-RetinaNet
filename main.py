@@ -213,6 +213,7 @@ def main():
             train_skip_step = args.SEQ_LEN 
 
         train_dataset = VideoDataset(args, train=True, skip_step=train_skip_step, transform=train_transform)
+        args.cls_num_list = train_dataset.cls_num_list # by jing
         logger.info('Done Loading Dataset Train Dataset')
         ## For validation set
         full_test = False

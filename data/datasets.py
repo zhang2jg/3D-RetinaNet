@@ -381,16 +381,22 @@ class VideoDataset(tutils.data.Dataset):
         self.numf_list = []
         frame_level_list = []
 
+        active_agents = dict() # jing - add 1 if a frame has duplex_label and the corresponding agent and action are 'acutally used' (subset of agent, actions)
+        agent_ness_cnt = 0
+        total_num_frames = 0
         for videoname in sorted(database.keys()):
             
             if not is_part_of_subsets(final_annots['db'][videoname]['split_ids'], self.SUBSETS):
                 continue
+
+            active_agents[videoname] = dict() # jing
             
             numf = database[videoname]['numf']
             self.numf_list.append(numf)
             self.video_list.append(videoname)
             
             frames = database[videoname]['frames']
+            total_num_frames += len(frames) # jing
             frame_level_annos = [ {'labeled':False,'ego_label':-1,'boxes':np.asarray([]),'labels':np.asarray([])} for _ in range(numf)]
 
             frame_nums = [int(f) for f in frames.keys()]
@@ -410,7 +416,7 @@ class VideoDataset(tutils.data.Dataset):
                     all_boxes = []
                     all_labels = []
                     frame_annos = frame['annos']
-                    for key in frame_annos:
+                    for key in frame_annos: # jing - key here is the detection box
                         width, height = frame['width'], frame['height']
                         anno = frame_annos[key]
                         box = anno['box']
@@ -433,6 +439,11 @@ class VideoDataset(tutils.data.Dataset):
                                 box_labels[fid+cc] = 1
                                 box_labels[0] = 1
                             cc += self.num_classes_list[idx+1]
+
+                            if name == 'duplex':
+                                if filtered_ids and frame_id not in active_agents[videoname]:
+                                    active_agents[videoname][frame_id] = 1
+                                    agent_ness_cnt += 1
 
                         all_labels.append(box_labels)
 
@@ -468,6 +479,8 @@ class VideoDataset(tutils.data.Dataset):
         ptrstr = ''
         self.frame_level_list = frame_level_list
         self.all_classes = [['agent_ness']]
+        self.cls_num_list = [] # by jing
+        agent_ness_num = 0 # by jing - accorrding to paper "Only one agent label can be assigned to each active agent present in the scene at any given time." so agent_ness count = number of frames where at least 1 agent is present and this agent has an action.
         for k, name in enumerate(self.label_types):
             labels = final_annots[name+'_labels']
             self.all_classes.append(labels)
@@ -475,6 +488,15 @@ class VideoDataset(tutils.data.Dataset):
             for c, cls_ in enumerate(labels): # just to see the distribution of train and test sets
                 ptrstr += '-'.join(self.SUBSETS) + ' {:05d} label: ind={:02d} name:{:s}\n'.format(
                                                 counts[c,k] , c, cls_)
+                self.cls_num_list.append(counts[c,k])
+                if name == 'agent':
+                    agent_ness_num += counts[c,k]
+        self.cls_num_list = [agent_ness_num] + self.cls_num_list
+        print(
+            "jing::agent_ness_num (sum of all agent occurences) = {}; total_num_frames = {}.".format(
+                agent_ness_num, total_num_frames))
+        # self.cls_num_list = [agent_ness_cnt] + self.cls_num_list
+        # print("jing::agent_ness_cnt (total number of active agents. at most 1 active agent in 1 frame) = {}; total_num_frames = {}.".format(agent_ness_cnt, total_num_frames))
         
         ptrstr += 'Number of ids are {:d}\n'.format(len(self.ids))
 

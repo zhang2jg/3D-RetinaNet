@@ -9,6 +9,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch, pdb, time
 from modules import box_utils
+from modules import utils
+logger = utils.get_logger(__name__)
 
 
 # Credits:: from https://github.com/facebookresearch/maskrcnn-benchmark/blob/master/maskrcnn_benchmark/layers/smooth_l1_loss.py
@@ -39,10 +41,126 @@ def sigmoid_focal_loss(preds, labels, num_pos, alpha, gamma):
     loss = (loss * focal_weight).sum() / num_pos
     return loss
 
+
+def sigmoid_cb_focal_loss(preds, labels, num_pos, cls_num_list, alpha, gamma):
+    if preds.shape[0] > 0:
+        min_preds = torch.min(preds)
+        if min_preds < 0:
+            logger.warn("min_preds={} is NEGATIVE. Be careful with reverse the sign for sigmoid.".format(min_preds))
+
+    gamma = 1
+    beta = 0.9999
+    weight = reweight(cls_num_list, beta=beta).cuda()
+    ## weight_per_sample = torch.tensor([weight[y] for y in labels]).cuda()
+    # print("cls_num_list:\n", cls_num_list)
+    # print("len(cls_num_list) = ", len(cls_num_list))
+    # print("weight:\n", weight)
+    # print("weight.shape = ", weight.shape)
+    # print("labels=", labels)
+    # print("labels.shape=", labels.shape)
+
+    loss = F.binary_cross_entropy(preds, labels, reduction='none')
+    # logger.info("preds = {}".format(preds))
+    # logger.info("labels = {}".format(labels))
+    # logger.info("loss = {}".format(loss))
+    # print("loss.shape=", loss.shape)
+
+    pt = preds * labels + (1.0 - preds) * (1.0 - labels)
+
+    # # original
+    # alpha_factor = alpha * labels + (1.0 - alpha) * (1.0 - labels)
+    # focal_weight_alpha = alpha_factor * ((1 - pt) ** gamma)
+    # print("focal_weight_alpha=\n", focal_weight_alpha)
+
+    # cb
+    cb_factor = weight * labels + (1.0 - beta) * (1.0 - labels)
+    focal_weight = cb_factor * ((1 - pt) ** gamma)
+    # print("focal_weight=\n", focal_weight)
+
+    loss_adj = (loss * focal_weight).sum() / num_pos
+
+    if loss_adj.item() > 200:
+        logger.error("loss > 200.")
+        logger.error("preds = {}".format(preds))
+        logger.error("labels = {}".format(labels))
+        logger.error("weight = {}".format(weight))
+        logger.error("cb_factor = {}".format(cb_factor))
+        logger.error("focal_weight = {}".format(focal_weight))
+        logger.error("loss = {}".format(loss))
+        logger.error("loss_adj = {}".format(loss_adj))
+        logger.error("num_pos = {}".format(num_pos))
+
+    return loss_adj
+
+
+def reweight(cls_num_list, beta=0.9999):
+    '''
+    Implement reweighting by effective numbers
+    :param cls_num_list: a list containing # of samples of each class
+    :param beta: hyper-parameter for reweighting, default value of 0.9999 is set based on tuning performance in a2 report
+    :return:
+    '''
+    per_cls_weights = torch.tensor([(1 - beta) / (1 - beta **n) for n in cls_num_list])
+    # print("per_cls_weights=\n", per_cls_weights)
+    # per_cls_weights = len(cls_num_list) * per_cls_weights / torch.sum(per_cls_weights)
+    per_cls_weights = per_cls_weights / torch.sum(per_cls_weights)
+    # print("(after normalization) per_cls_weights=\n", per_cls_weights)
+
+    return per_cls_weights
+
+#
+# def sigmoid_cb_focal_loss_v1(preds, labels, num_pos, cls_num_list):
+#     """
+#     :param preds: sigmoid activated predictions
+#     :param labels: integer labels (NOT one-hot encoded)
+#     :param num_pos: number of positve samples
+#     :return:
+#     """
+#     weight = reweight(cls_num_list)
+#     print("cls_num_list:\n", cls_num_list)
+#     print("len(cls_num_list) = ", len(cls_num_list))
+#     print("weight:\n", weight)
+#     print("weight.shape = ", weight.shape)
+#     print("labels=", labels)
+#     # weight = [1] + weight # [1] is for agent_ness having no CB effect. 7/26 - no need as agentness count is added. now len(cls_num_list) should be 149.
+#
+#     m = labels.shape[0]
+#     # gamma = 1
+#     # weight_per_sample = torch.tensor([weight[y] for y in labels]).cuda()
+#     # log_likelihood = -weight_per_sample * torch.log(preds[range(m), labels]) * torch.pow(
+#     #     1 - preds[range(m), labels], gamma)
+#     alpha = 0.25
+#     gamma = 2.0
+#     log_likelihood = -alpha * torch.log(preds[range(m), labels]) * torch.pow(
+#         1 - preds[range(m), labels], gamma)
+#     loss = torch.sum(log_likelihood) / num_pos
+#     print("log_likelihood=\n", log_likelihood)
+#     print("torch.sum(log_likelihood)={}; num_pos={}; m={}".format(torch.sum(log_likelihood), num_pos, m))
+#     return loss
+
+
 def get_one_hot_labels(tgt_labels, numc):
     new_labels = torch.zeros([tgt_labels.shape[0], numc], device=tgt_labels.device)
     new_labels[:, tgt_labels] = 1.0
     return new_labels
+
+
+def onehot2int(one_hot):
+    """
+    Convert one-hot tensor
+    :param one_hot:
+    :return:
+    """
+    print("one_hot.shape=", one_hot.shape)
+    print("torch.sum(one_hot) = ", torch.sum(one_hot))
+    print("torch.max(one_hot, 1)[:10] = ", torch.max(one_hot, 1)[:10])
+    # print("one_hot.tolist()[:10] = ", one_hot.tolist()[:10])
+    out = torch.argmax(one_hot, dim=-1)
+    debug_filter = [i for i in out.tolist() if i > 0]
+    print("debug_filter=", debug_filter)
+    # print("out.tolist()[:10] = ", out.tolist()[:10])
+    return out
+
 
 
 
@@ -60,6 +178,7 @@ class FocalLoss(nn.Module):
         self.num_classes_list = args.num_classes_list
         self.alpha = 0.25
         self.gamma = 2.0
+        self.cls_num_list = args.cls_num_list
 
 
     def forward(self, confidence, predicted_locations, gt_boxes, gt_labels, counts, anchors, ego_preds, ego_labels):
@@ -150,16 +269,28 @@ class FocalLoss(nn.Module):
         
         masked_labels = all_labels[mask].reshape(-1, self.num_classes) # Remove Ignore labels
         masked_preds = preds[mask].reshape(-1, self.num_classes) # Remove Ignore preds
-        cls_loss = sigmoid_focal_loss(masked_preds, masked_labels, num_pos, self.alpha, self.gamma)
+        # print("Jing test: cls_loss all_labels[mask]: {} and preds[mask]: {}".format(all_labels[mask].shape, preds[mask].shape))
+        # print("self.num_classes = {}".format(self.num_classes))
+        # print("all_labels[mask]:\n", all_labels[mask])
+        # print("all_labels[mask].shape = ", all_labels[mask].shape)
+        # print("all_labels[mask].max() = ", all_labels[mask].max())
+        # print("preds[mask]:\n", preds[mask])
+        # cls_loss = sigmoid_focal_loss(masked_preds, masked_labels, num_pos, self.alpha, self.gamma)
+        # cls_loss = sigmoid_cb_focal_loss(masked_preds, onehot2int(masked_labels), num_pos, self.cls_num_list)
+        cls_loss = sigmoid_cb_focal_loss(masked_preds, masked_labels, num_pos, self.cls_num_list, self.alpha, self.gamma) # label is one-hot encoding
 
         mask = ego_labels>-1
         numc = ego_preds.shape[-1]
         masked_preds = ego_preds[mask].reshape(-1, numc) # Remove Ignore preds
         masked_labels = ego_labels[mask].reshape(-1) # Remove Ignore labels
+        # print("ego_preds[mask]:\n", ego_preds[mask])
+        # print("ego_labels[mask]:\n", ego_labels[mask])
         one_hot_labels = get_one_hot_labels(masked_labels, numc)
         ego_loss = 0
         if one_hot_labels.shape[0]>0:
             ego_loss = sigmoid_focal_loss(masked_preds, one_hot_labels, one_hot_labels.shape[0], self.alpha, self.gamma)
+            # ego_loss = sigmoid_cb_focal_loss(masked_preds, masked_labels, masked_labels.shape[0])
         
         # print(regression_loss, cls_loss, ego_loss)
+        # print("regression_loss={}, cls_loss={}, ego_loss={}".format(regression_loss, cls_loss, ego_loss))
         return regression_loss, cls_loss/8.0 + ego_loss/4.0

@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python main.py ../ ../  ../kinetics-pt/ --MODE=train --ARCH=resnet50 --MODEL_TYPE=I3D --DATASET=road --TRAIN_SUBSETS=train_3 --SEQ_LEN=2 --TEST_SEQ_LEN=2 --BATCH_SIZE=1 --LR=0.0041 --NUM_WORKERS=2
