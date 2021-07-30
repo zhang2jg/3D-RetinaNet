@@ -4,9 +4,11 @@ mkdir DL
 home_dir=$cwd/DL
 cd $home_dir
 
-# git clone repos
-git clone # https://github.com/gurkirt/3D-RetinaNet.git
+# git clone repos # https://github.com/gurkirt/3D-RetinaNet.git
+git clone https://github.com/zhang2jg/3D-RetinaNet.git
 git clone https://github.com/gurkirt/road-dataset.git
+
+screen -S dl -L
 
 # install dependencies
 #pip3 install torch torchvision torchaudio tensorboardx
@@ -45,12 +47,20 @@ python ./road-dataset/extract_videos2jpgs.py ./road/
 
 # run command (train and gen_det)
 cd $home_dir/3D-RetinaNet
+vi run_train_gen_det.sh  # copy train and evaluate command. need home_dir=/root/DL, conda activate dl
+chmod 740 run_train_gen_det.sh
+
 # train -
 CUDA_VISIBLE_DEVICES=0,1,2,3 python main.py ${home_dir}/ ${home_dir}/ ${home_dir}/kinetics-pt/ --MODE=train --ARCH=resnet50 --MODEL_TYPE=I3D --DATASET=road --TRAIN_SUBSETS=train_3 --SEQ_LEN=8 --TEST_SEQ_LEN=8 --BATCH_SIZE=4 --LR=0.0041
 #CUDA_VISIBLE_DEVICES=0 python main.py ${home_dir}/ ${home_dir}/ ${home_dir}/kinetics-pt/ --MODE=train --ARCH=resnet50 --MODEL_TYPE=I3D --DATASET=road --TRAIN_SUBSETS=train_3 --SEQ_LEN=8 --TEST_SEQ_LEN=8 --BATCH_SIZE=1 --LR=0.0041
 
 # test and building tubes
-python main.py ${home_dir}/ ${home_dir}/ ${home_dir}/kinetics-pt/ --MODE=gen_dets --MODEL_TYPE=I3D --TEST_SEQ_LEN=8 --TRAIN_SUBSETS=train_3 --SEQ_LEN=8 --BATCH_SIZE=4 --LR=0.0041
+if [ $? -eq 0 ]; then
+  echo "training is completed successfully. Running evaluation..."
+  python main.py ${home_dir}/ ${home_dir}/ ${home_dir}/kinetics-pt/ --MODE=gen_dets --MODEL_TYPE=I3D --TEST_SEQ_LEN=8 --TRAIN_SUBSETS=train_3 --SEQ_LEN=8 --BATCH_SIZE=4 --LR=0.0041
+else
+  echo "training fails. check checkpoints under /road/cache/. Can resume the training by specifying the start epoch (--RESUME) or use trained model at given epoch (--EVAL_EPOCHS)."
+fi
 
 # upload results to cloud
 today=$(date +%Y-%m-%d_%H-%M-%S)
@@ -58,6 +68,7 @@ result_file=result-${today}.txt
 cp screenlog.0 ${result_file}
 sftp -P 15022  18018626116:pRixN49a@pan.blockelite.cn <<END
 put ${result_file} /CloudData/DL_data
+put -r ${home_dir}/road/cache /CloudData/DL_data
 END
 
 ## to run validation using pre-trained model from google drive

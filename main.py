@@ -177,6 +177,7 @@ def main():
 
     args = utils.set_args(args) # set directories and SUBSETS fo datasets
     args.MULTI_GPUS = False if args.BATCH_SIZE == 1 else args.MULTI_GPUS
+
     ## set random seeds and global settings
     np.random.seed(args.MAN_SEED)
     torch.manual_seed(args.MAN_SEED)
@@ -188,6 +189,7 @@ def main():
     utils.setup_logger(args)
     logger = utils.get_logger(__name__)
     logger.info(sys.version)
+    logger.info("args.MULTI_GPUS = {}".format(args.MULTI_GPUS))
 
     assert args.MODE in ['train','val','gen_dets','eval_frames', 'eval_tubes'], 'MODE must be from ' + ','.join(['train','test','tubes'])
 
